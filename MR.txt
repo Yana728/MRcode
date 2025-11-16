@@ -1,0 +1,152 @@
+library(TwoSampleMR)
+library(data.table)
+library(LDlinkR)
+memory.limit(size=144440560000)
+
+
+##########
+# Exposure #
+##########
+Neuroticism <- fread('sumstats_neuro_sum_ctg_format.txt',header=T)
+Neuroticism_1 <- format_data(Neuroticism,
+                     type='exposure',
+                     snp_col = "SNP",
+                     beta_col = "BETA",
+                     se_col = "SE",
+                     effect_allele_col ="A1",
+                     other_allele_col = "A2",
+                     eaf_col = "EAF",
+                     pval_col = "P")
+Neuroticism_new_1 <- subset(Neuroticism_1, pval.exposure < 5e-8)
+Neuroticism_dat <- clump_data(Neuroticism_new_1,clump_r2=0.01,clump_kb=10000) 
+
+
+##########
+# Outcome #
+##########
+# IS #
+IS_out_dat <- extract_outcome_data(Neuroticism_dat$SNP,              
+                                   outcomes='ebi-a-GCST006908',          
+                                   proxies = T, rsq=0.90,          
+                                   maf_threshold = 0.01,       
+                                   access_token = NULL)  
+# ICH #
+ICH_out_dat <- format_data(                                  
+  dat = ICH,
+  type = "outcome",
+  snps = Neuroticism_dat$SNP,
+  header = TRUE,
+  phenotype_col = "phenotype",
+  snp_col = "MarkerName",
+  beta_col = "Effect",
+  se_col = "StdErr",
+  eaf_col = "Freq1",
+  effect_allele_col = "Allele1",
+  other_allele_col = "Allele2",
+  pval_col = "P.value",
+  id_col = "ID"
+)
+# LD proxy for ICH outcome #
+ICH_out_dat <- format_data(                                  
+  dat = ICH,
+  type = "outcome",
+  snps = Neuroticism_dat_for_ICH$SNP,
+  header = TRUE,
+  phenotype_col = "phenotype",
+  snp_col = "MarkerName",
+  beta_col = "Effect",
+  se_col = "StdErr",
+  eaf_col = "Freq1",
+  effect_allele_col = "Allele1",
+  other_allele_col = "Allele2",
+  pval_col = "P.value",
+  id_col = "ID")
+# CAD #
+CAD_out_dat <- extract_outcome_data(Neuroticism_dat$SNP,              
+                                    outcomes='ieu-a-7',          
+                                    proxies = T, rsq=0.90,
+                                    maf_threshold = 0.01,       
+                                    access_token = NULL) 
+# MI #
+MI_out_dat <- extract_outcome_data(Neuroticism_dat$SNP,              
+                                    outcomes='ieu-a-798',          
+                                    proxies = T, rsq=0.90,
+                                    maf_threshold = 0.01,       
+                                    access_token = NULL) 
+
+
+###########
+# Harmonise #
+###########
+IS_dat <- harmonise_data(Neuroticism_dat,IS_out_dat,action = 1)
+ICH_dat <- harmonise_data(Neuroticism_dat_for_ICH,ICH_out_dat,action = 1)
+CAD_dat <- harmonise_data(Neuroticism_dat,CAD_out_dat,action = 1)
+MI_dat <- harmonise_data(Neuroticism_dat,MI_out_dat,action = 1)
+
+
+#################
+# Heterogeneity test #
+#################
+mr_heterogeneity(IS_dat,method_list = "mr_ivw")
+mr_heterogeneity(ICH_dat,method_list = "mr_ivw")
+mr_heterogeneity(CAD_dat,method_list = "mr_ivw")
+mr_heterogeneity(MI_dat,method_list = "mr_ivw")
+
+
+######
+# MR #
+######
+IS_IVW_OR<-generate_odds_ratios(mr(IS_dat,method_list = "mr_ivw_mre"))
+ICH_IVW_OR<-generate_odds_ratios(mr(ICH_dat,method_list = "mr_ivw_fe"))
+CAD_IVW_OR<-generate_odds_ratiosmr((CAD_dat,method_list = "mr_ivw_mre"))
+MI_IVW_OR<-generate_odds_ratios(mr(MI_dat,method_list = "mr_ivw_mre"))
+
+
+##################
+# Sensitivity analyses #
+##################
+# WM #
+set.seed(1234)
+IS_WM_OR<-generate_odds_ratios(mr(IS_dat,method_list = c("mr_weighted_median")))
+ICH_WM_OR<-generate_odds_ratios(mr(ICH_dat,method_list = c("mr_weighted_median")))
+CAD_WM_OR<-generate_odds_ratios(mr(CAD_dat,method_list = c("mr_weighted_median")))
+MI_WM_OR<-generate_odds_ratios(mr(MI_dat,method_list = c("mr_weighted_median")))
+
+# GSMR #
+library(gsmr)
+# LD correlation matrix #
+LD_IS <- ld_matrix(IS_dat$SNP, with_alleles = FALSE) 
+LD_ICH <- ld_matrix(ICH_dat$SNP, with_alleles = FALSE) 
+LD_CAD <- ld_matrix(CAD_dat$SNP, with_alleles = FALSE) 
+LD_MI <- ld_matrix(MI_dat$SNP, with_alleles = FALSE) 
+gsmr_IS <- gsmr(bzx=IS_dat$beta.exposure, bzx_se=IS_dat$se.exposure, bzx_pval=IS_dat$pval.exposure,
+                bzy=IS_dat$beta.outcome, bzy_se=IS_dat$se.outcome, bzy_pval=IS_dat$pval.outcome,
+                ldrho=LD_IS, snpid=as.character(IS_dat$SNP), n_ref=503)
+gsmr_ICH <- gsmr(bzx=ICH_dat$beta.exposure, bzx_se=ICH_dat$se.exposure, bzx_pval=ICH_dat$pval.exposure,
+                bzy=ICH_dat$beta.outcome, bzy_se=ICH_dat$se.outcome, bzy_pval=ICH_dat$pval.outcome,
+                ldrho=LD_ICH, snpid=as.character(ICH_dat$SNP), n_ref=503)
+gsmr_CAD <- gsmr(bzx=CAD_dat$beta.exposure, bzx_se=CAD_dat$se.exposure, bzx_pval=CAD_dat$pval.exposure,
+                 bzy=CAD_dat$beta.outcome, bzy_se=CAD_dat$se.outcome, bzy_pval=CAD_dat$pval.outcome,
+                 ldrho=LD_CAD, snpid=as.character(CAD_dat$SNP), n_ref=503)
+gsmr_MI <- gsmr(bzx=MI_dat$beta.exposure, bzx_se=MI_dat$se.exposure, bzx_pval=MI_dat$pval.exposure,
+                 bzy=MI_dat$beta.outcome, bzy_se=MI_dat$se.outcome, bzy_pval=MI_dat$pval.outcome,
+                 ldrho=LD_MI, snpid=as.character(MI_dat$SNP), n_ref=503)
+
+# Maximum likelihood #
+library(MendelianRandomization)
+IS_dat <- dat_to_MRInput(IS_dat) 
+ICH_dat <- dat_to_MRInput(ICH_dat) 
+CAD_dat <- dat_to_MRInput(CAD_dat) 
+MI_dat <- dat_to_MRInput(MI_dat) 
+MaxLik_IS <- MendelianRandomization::mr_maxlik(IS_dat[[1]],model = "random",correl = FALSE,psi =0,distribution = "normal",alpha = 0.05)
+MaxLik_ICH <- MendelianRandomization::mr_maxlik(ICH_dat[[1]],model = "random",correl = FALSE,psi =0,distribution = "normal",alpha = 0.05)
+MaxLik_CAD <- MendelianRandomization::mr_maxlik(CAD_dat[[1]],model = "random",correl = FALSE,psi =0,distribution = "normal",alpha = 0.05)
+MaxLik_MI <- MendelianRandomization::mr_maxlik(MI_dat[[1]],model = "random",correl = FALSE,psi =0,distribution = "normal",alpha = 0.05)
+
+# Pleiotropy test #
+# Egger intercept #
+IS_egger <- mr_pleiotropy_test(IS_dat)
+ICH_egger <- mr_pleiotropy_test(ICH_dat)
+CAD_egger <- mr_pleiotropy_test(CAD_dat)
+MI_egger <- mr_pleiotropy_test(MI_dat)
+
