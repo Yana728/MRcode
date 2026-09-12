@@ -1,152 +1,394 @@
+# Exposure
 library(TwoSampleMR)
+Dep <- extract_instruments(outcomes='ebi-a-GCST90018833',p1=5e-06)
+ATD <- extract_instruments(outcomes='ebi-a-GCST90018998',p1=5e-06)
+
+# Outcome
 library(data.table)
-library(LDlinkR)
-memory.limit(size=144440560000)
+seq_TB <- as.data.frame(fread('finngen_R12_AB1_SEQULAE_TUBERCU.gz',header=T))
+Dep_TB <- format_data(dat = seq_TB, type = "outcome",header = TRUE,
+                      snps = Dep$SNP, snp_col = "rsids", gene_col = "nearest_genes",
+                      chr_col = "#chrom", pos_col = "pos", pval_col = "pval",
+                      beta_col = "beta", se_col = "sebeta", eaf_col = "af_alt",
+                      effect_allele_col = "alt", other_allele_col = "ref")
+ATD_TB <- format_data(dat = seq_TB, type = "outcome",header = TRUE,
+                      snps = ATD$SNP, snp_col = "rsids", gene_col = "nearest_genes",
+                      chr_col = "#chrom", pos_col = "pos", pval_col = "pval",
+                      beta_col = "beta", se_col = "sebeta", eaf_col = "af_alt",
+                      effect_allele_col = "alt", other_allele_col = "ref")
+# Harmonise
+Dep_Harmonise<-harmonise_data(Dep, Dep_TB, action = 2)
+ATD_Harmonise<-harmonise_data(ATD, ATD_TB, action = 2)
 
+# heterogeneity test
+mr_heterogeneity(Dep_Harmonise,method_list = "mr_ivw")
+mr_heterogeneity(ATD_Harmonise,method_list = "mr_ivw")
 
-##########
-# Exposure #
-##########
-Neuroticism <- fread('sumstats_neuro_sum_ctg_format.txt',header=T)
-Neuroticism_1 <- format_data(Neuroticism,
-                     type='exposure',
-                     snp_col = "SNP",
-                     beta_col = "BETA",
-                     se_col = "SE",
-                     effect_allele_col ="A1",
-                     other_allele_col = "A2",
-                     eaf_col = "EAF",
-                     pval_col = "P")
-Neuroticism_new_1 <- subset(Neuroticism_1, pval.exposure < 5e-8)
-Neuroticism_dat <- clump_data(Neuroticism_new_1,clump_r2=0.01,clump_kb=10000) 
+# IVW
+Dep_IVW <- generate_odds_ratios(mr(Dep_Harmonise,method_list = c("mr_ivw_fe","mr_ivw_mre")))
+ATD_IVW <- generate_odds_ratios(mr(ATD_Harmonise,method_list = c("mr_ivw_fe","mr_ivw_mre")))
 
+# sensitive analysis
+Dep_sensitive <- generate_odds_ratios(mr(Dep_Harmonise,method_list = c("mr_two_sample_ml","mr_weighted_median","mr_weighted_mode")))
+ATD_sensitive <- generate_odds_ratios(mr(ATD_Harmonise,method_list = c("mr_two_sample_ml","mr_weighted_median","mr_weighted_mode")))
 
-##########
-# Outcome #
-##########
-# IS #
-IS_out_dat <- extract_outcome_data(Neuroticism_dat$SNP,              
-                                   outcomes='ebi-a-GCST006908',          
-                                   proxies = T, rsq=0.90,          
-                                   maf_threshold = 0.01,       
-                                   access_token = NULL)  
-# ICH #
-ICH_out_dat <- format_data(                                  
-  dat = ICH,
-  type = "outcome",
-  snps = Neuroticism_dat$SNP,
-  header = TRUE,
-  phenotype_col = "phenotype",
-  snp_col = "MarkerName",
-  beta_col = "Effect",
-  se_col = "StdErr",
-  eaf_col = "Freq1",
-  effect_allele_col = "Allele1",
-  other_allele_col = "Allele2",
-  pval_col = "P.value",
-  id_col = "ID"
-)
-# LD proxy for ICH outcome #
-ICH_out_dat <- format_data(                                  
-  dat = ICH,
-  type = "outcome",
-  snps = Neuroticism_dat_for_ICH$SNP,
-  header = TRUE,
-  phenotype_col = "phenotype",
-  snp_col = "MarkerName",
-  beta_col = "Effect",
-  se_col = "StdErr",
-  eaf_col = "Freq1",
-  effect_allele_col = "Allele1",
-  other_allele_col = "Allele2",
-  pval_col = "P.value",
-  id_col = "ID")
-# CAD #
-CAD_out_dat <- extract_outcome_data(Neuroticism_dat$SNP,              
-                                    outcomes='ieu-a-7',          
-                                    proxies = T, rsq=0.90,
-                                    maf_threshold = 0.01,       
-                                    access_token = NULL) 
-# MI #
-MI_out_dat <- extract_outcome_data(Neuroticism_dat$SNP,              
-                                    outcomes='ieu-a-798',          
-                                    proxies = T, rsq=0.90,
-                                    maf_threshold = 0.01,       
-                                    access_token = NULL) 
+# MRPRESSO
+library(MRPRESSO)
+set.seed(123)
+Dep_presso <- mr_presso(data = Dep_Harmonise, BetaOutcome = "beta.outcome",
+                        BetaExposure = "beta.exposure", SdOutcome = "se.outcome",
+                        SdExposure = "se.exposure", OUTLIERtest = T, 
+                        DISTORTIONtest = T, NbDistribution =1000)
+ATD_presso <- mr_presso(data = ATD_Harmonise, BetaOutcome = "beta.outcome",
+                        BetaExposure = "beta.exposure", SdOutcome = "se.outcome",
+                        SdExposure = "se.exposure", OUTLIERtest = T, 
+                        DISTORTIONtest = T, NbDistribution =1000)
 
+# MR-PRESSO global test
+Dep_presso$`MR-PRESSO results`$`Global Test`
+ATD_presso$`MR-PRESSO results`$`Global Test`
+# egger intercept
+mr_pleiotropy_test(Dep_Harmonise)
+mr_pleiotropy_test(ATD_Harmonise)
 
-###########
-# Harmonise #
-###########
-IS_dat <- harmonise_data(Neuroticism_dat,IS_out_dat,action = 1)
-ICH_dat <- harmonise_data(Neuroticism_dat_for_ICH,ICH_out_dat,action = 1)
-CAD_dat <- harmonise_data(Neuroticism_dat,CAD_out_dat,action = 1)
-MI_dat <- harmonise_data(Neuroticism_dat,MI_out_dat,action = 1)
+# MR-RAPS
+Dep_raps <- mr.raps::mr.raps(b_exp=Dep_Harmonise$beta.exposure, b_out=Dep_Harmonise$beta.outcome,
+                             se_exp=Dep_Harmonise$se.exposure, se_out=Dep_Harmonise$se.outcome,
+                             over.dispersion = FALSE, loss.function = "tukey")
+ATD_raps <- mr.raps::mr.raps(b_exp=ATD_Harmonise$beta.exposure, b_out=ATD_Harmonise$beta.outcome,
+                             se_exp=ATD_Harmonise$se.exposure, se_out=ATD_Harmonise$se.outcome,
+                             over.dispersion = FALSE, loss.function = "tukey")
 
-
-#################
-# Heterogeneity test #
-#################
-mr_heterogeneity(IS_dat,method_list = "mr_ivw")
-mr_heterogeneity(ICH_dat,method_list = "mr_ivw")
-mr_heterogeneity(CAD_dat,method_list = "mr_ivw")
-mr_heterogeneity(MI_dat,method_list = "mr_ivw")
-
-
-######
-# MR #
-######
-IS_IVW_OR<-generate_odds_ratios(mr(IS_dat,method_list = "mr_ivw_mre"))
-ICH_IVW_OR<-generate_odds_ratios(mr(ICH_dat,method_list = "mr_ivw_fe"))
-CAD_IVW_OR<-generate_odds_ratiosmr((CAD_dat,method_list = "mr_ivw_mre"))
-MI_IVW_OR<-generate_odds_ratios(mr(MI_dat,method_list = "mr_ivw_mre"))
-
-
-##################
-# Sensitivity analyses #
-##################
-# WM #
-set.seed(1234)
-IS_WM_OR<-generate_odds_ratios(mr(IS_dat,method_list = c("mr_weighted_median")))
-ICH_WM_OR<-generate_odds_ratios(mr(ICH_dat,method_list = c("mr_weighted_median")))
-CAD_WM_OR<-generate_odds_ratios(mr(CAD_dat,method_list = c("mr_weighted_median")))
-MI_WM_OR<-generate_odds_ratios(mr(MI_dat,method_list = c("mr_weighted_median")))
+# MRcML
+library(MRcML)
+set.seed(123)
+Dep_cML <- MRcML::mr_cML(Dep_Harmonise$beta.exposure, Dep_Harmonise$beta.outcome,
+                         Dep_Harmonise$se.exposure, Dep_Harmonise$se.outcome, n = 449414,
+                         random_start = 100, random_seed = 1)
+ATD_cML <- MRcML::mr_cML(ATD_Harmonise$beta.exposure, ATD_Harmonise$beta.outcome,
+                         ATD_Harmonise$se.exposure, ATD_Harmonise$se.outcome, n = 304162,
+                         random_start = 100, random_seed = 1)
 
 # GSMR #
 library(gsmr)
-# LD correlation matrix #
-LD_IS <- ld_matrix(IS_dat$SNP, with_alleles = FALSE) 
-LD_ICH <- ld_matrix(ICH_dat$SNP, with_alleles = FALSE) 
-LD_CAD <- ld_matrix(CAD_dat$SNP, with_alleles = FALSE) 
-LD_MI <- ld_matrix(MI_dat$SNP, with_alleles = FALSE) 
-gsmr_IS <- gsmr(bzx=IS_dat$beta.exposure, bzx_se=IS_dat$se.exposure, bzx_pval=IS_dat$pval.exposure,
-                bzy=IS_dat$beta.outcome, bzy_se=IS_dat$se.outcome, bzy_pval=IS_dat$pval.outcome,
-                ldrho=LD_IS, snpid=as.character(IS_dat$SNP), n_ref=503)
-gsmr_ICH <- gsmr(bzx=ICH_dat$beta.exposure, bzx_se=ICH_dat$se.exposure, bzx_pval=ICH_dat$pval.exposure,
-                bzy=ICH_dat$beta.outcome, bzy_se=ICH_dat$se.outcome, bzy_pval=ICH_dat$pval.outcome,
-                ldrho=LD_ICH, snpid=as.character(ICH_dat$SNP), n_ref=503)
-gsmr_CAD <- gsmr(bzx=CAD_dat$beta.exposure, bzx_se=CAD_dat$se.exposure, bzx_pval=CAD_dat$pval.exposure,
-                 bzy=CAD_dat$beta.outcome, bzy_se=CAD_dat$se.outcome, bzy_pval=CAD_dat$pval.outcome,
-                 ldrho=LD_CAD, snpid=as.character(CAD_dat$SNP), n_ref=503)
-gsmr_MI <- gsmr(bzx=MI_dat$beta.exposure, bzx_se=MI_dat$se.exposure, bzx_pval=MI_dat$pval.exposure,
-                 bzy=MI_dat$beta.outcome, bzy_se=MI_dat$se.outcome, bzy_pval=MI_dat$pval.outcome,
-                 ldrho=LD_MI, snpid=as.character(MI_dat$SNP), n_ref=503)
+Dep_LD <- ld_matrix(Dep_Harmonise$SNP, with_alleles = FALSE) 
+Dep_gsmr <- gsmr(bzx=Dep_Harmonise$beta.exposure, bzx_se=Dep_Harmonise$se.exposure,
+                 bzx_pval=Dep_Harmonise$pval.exposure, bzy=Dep_Harmonise$beta.outcome,
+                 bzy_se=Dep_Harmonise$se.outcome, bzy_pval=Dep_Harmonise$pval.outcome,
+                 ldrho=Dep_LD, snpid=as.character(Dep_Harmonise$SNP), n_ref=503, gwas_thresh = 5e-6)
+ATD_LD <- ld_matrix(ATD_Harmonise$SNP, with_alleles = FALSE) 
+ATD_gsmr <- gsmr(bzx=ATD_Harmonise$beta.exposure, bzx_se=ATD_Harmonise$se.exposure,
+                 bzx_pval=ATD_Harmonise$pval.exposure, bzy=ATD_Harmonise$beta.outcome,
+                 bzy_se=ATD_Harmonise$se.outcome, bzy_pval=ATD_Harmonise$pval.outcome,
+                 ldrho=ATD_LD, snpid=as.character(ATD_Harmonise$SNP), n_ref=503, gwas_thresh = 5e-6, nsnps_thresh = 3)
 
-# Maximum likelihood #
-library(MendelianRandomization)
-IS_dat <- dat_to_MRInput(IS_dat) 
-ICH_dat <- dat_to_MRInput(ICH_dat) 
-CAD_dat <- dat_to_MRInput(CAD_dat) 
-MI_dat <- dat_to_MRInput(MI_dat) 
-MaxLik_IS <- MendelianRandomization::mr_maxlik(IS_dat[[1]],model = "random",correl = FALSE,psi =0,distribution = "normal",alpha = 0.05)
-MaxLik_ICH <- MendelianRandomization::mr_maxlik(ICH_dat[[1]],model = "random",correl = FALSE,psi =0,distribution = "normal",alpha = 0.05)
-MaxLik_CAD <- MendelianRandomization::mr_maxlik(CAD_dat[[1]],model = "random",correl = FALSE,psi =0,distribution = "normal",alpha = 0.05)
-MaxLik_MI <- MendelianRandomization::mr_maxlik(MI_dat[[1]],model = "random",correl = FALSE,psi =0,distribution = "normal",alpha = 0.05)
+# Directionality Steiger
+Dep_Harmonise$samplesize.outcome=497887
+ATD_Harmonise$samplesize.outcome=497887
+directionality_test(Dep_Harmonise)
+directionality_test(ATD_Harmonise)
 
-# Pleiotropy test #
-# Egger intercept #
-IS_egger <- mr_pleiotropy_test(IS_dat)
-ICH_egger <- mr_pleiotropy_test(ICH_dat)
-CAD_egger <- mr_pleiotropy_test(CAD_dat)
-MI_egger <- mr_pleiotropy_test(MI_dat)
+# Forest plot 
+library(forestplot)
+forest <- read.csv('forest.csv',header = F) 
+forestplot(labeltext = as.matrix(forest[,1:4]),
+           mean = forest$V5,  
+           lower = forest$V6, 
+           upper = forest$V7, 
+           is.summary=c(T,rep(F,18)), 
+           align = c("l","l","c","r"),
+           hrzl_lines=list("2"=gpar(lwd=1,columns=c(1:5))),
+           zero = 1, 
+           ci.vertices.height=0.1,              
+           boxsize = 0.3,          
+           lineheight = unit(8,'mm'), 
+           colgap = unit(5,'mm'),  
+           lwd.zero = 1.5,
+           lwd.ci = 2, 
+           lwd.xaxis=2, 
+           xlab="OR (95%CI)", 
+           xticks=c(0,0.5,1,1.5,2),  
+           clip=c(0,2), 
+           lty.ci = "solid",
+           graph.pos = 3,  
+           graphwidth = unit(5,"cm"), 
+           col=fpColors(box='black',lines = 'black',zero = 'grey'),
+           txt_gp=fpTxtGp(label=gpar(fontfamily = "serif", cex=1.2),   
+                          ticks=gpar(fontfamily = "serif", cex=1),
+                          xlab=gpar(fontfamily = "serif", cex=1,fontface='bold'))) 
 
+# scatter plot
+library(ggplot2)
+Dep_plo <- ggplot() +
+  geom_errorbarh(data = Dep_scatter,
+                 aes(x = beta_x, y = beta_y,
+                     xmin = beta_x - 1.96 * se_x, 
+                     xmax = beta_x + 1.96 * se_x),
+                 height = 0, color = "grey70", alpha = 0.5) +
+  geom_errorbar(data = Dep_scatter,
+                aes(x = beta_x, y = beta_y,
+                    ymin = beta_y - 1.96 * se_y,
+                    ymax = beta_y + 1.96 * se_y),
+                width = 0, color = "grey70", alpha = 0.5) +
+  geom_point(data = Dep_scatter,
+             aes(x = beta_x, y = beta_y),
+             color = "#2E86AB", size = 2, alpha = 0.8) +
+  geom_abline(data = Dep_scatter_lines,
+              aes(slope = slope,
+                  intercept = intercept,
+                  color = method),
+              linetype = "solid", linewidth = 0.9) +
+  labs(x = "SNP effect on the depression",
+       y = "SNP effect on the sequelae of tuberculosis") +
+  scale_color_manual(
+    name = "Method",
+    values = c("Fixed-effect IVW" = "#E41A1C",
+               "Random-effect IVW" = "#999999",
+               "Maximum Likelihood" = "#377EB8",
+               "Weighted median" = "#A65628",
+               "Weighted mode" = "#F781BF",
+               "MR-PRESSO" = "#984EA3",
+               "MR-RAPS" = "#FFD700",
+               "cML-MA" = "#4DAF4A",
+               "GSMR" = "#FF7F00"),
+    breaks = c("Fixed-effect IVW","Random-effect IVW","Maximum Likelihood","Weighted median","Weighted mode","MR-PRESSO","MR-RAPS","cML-MA","GSMR")
+  ) +
+  theme(
+    text = element_text(family = "serif"),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = "white", color = NA),
+    axis.title.x = element_text(face = "bold", size = 11, margin = margin(t = 10)),
+    axis.title.y = element_text(face = "bold", size = 11, margin = margin(r = 10)),
+    axis.line = element_line(color = "black", linewidth = 0.5),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(0.15, "cm"),
+    axis.text = element_text(color = "black", family = "serif"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.border = element_rect(fill = NA, color = "black", linewidth = 0.5),
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.margin = margin(5, 5, 5, 5, "mm")
+  )
+Dep_plo
+
+# ATD
+ATD_plo <- ggplot() +
+  geom_errorbarh(data = ATD_scatter,
+                 aes(x = beta_x, y = beta_y,
+                     xmin = beta_x - 1.96 * se_x, 
+                     xmax = beta_x + 1.96 * se_x),
+                 height = 0, color = "grey70", alpha = 0.5) +
+  geom_errorbar(data = ATD_scatter,
+                aes(x = beta_x, y = beta_y,
+                    ymin = beta_y - 1.96 * se_y,
+                    ymax = beta_y + 1.96 * se_y),
+                width = 0, color = "grey70", alpha = 0.5) +
+  geom_point(data = ATD_scatter,
+             aes(x = beta_x, y = beta_y),
+             color = "#2E86AB", size = 2, alpha = 0.8) +
+  geom_abline(data = ATD_scatter_lines,
+              aes(slope = slope,
+                  intercept = intercept,
+                  color = method),
+              linetype = "solid", linewidth = 0.9) +
+  labs(x = "SNP effect on the antidepressant use",
+       y = "SNP effect on the sequelae of tuberculosis") +
+  scale_color_manual(
+    name = "Method",
+    values = c("Fixed-effect IVW" = "#E41A1C",
+               "Random-effect IVW" = "#999999",
+               "Maximum Likelihood" = "#377EB8",
+               "Weighted median" = "#A65628",
+               "Weighted mode" = "#F781BF",
+               "MR-PRESSO" = "#984EA3",
+               "MR-RAPS" = "#FFD700",
+               "cML-MA" = "#4DAF4A",
+               "GSMR" = "#FF7F00"),
+    breaks = c("Fixed-effect IVW","Random-effect IVW","Maximum Likelihood","Weighted median","Weighted mode","MR-PRESSO","MR-RAPS","cML-MA","GSMR")
+  ) +
+  theme(
+    text = element_text(family = "serif"),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.key = element_rect(fill = "white", color = NA),
+    axis.title.x = element_text(face = "bold", size = 11, margin = margin(t = 10)),
+    axis.title.y = element_text(face = "bold", size = 11, margin = margin(r = 10)),
+    axis.line = element_line(color = "black", linewidth = 0.5),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(0.15, "cm"),
+    axis.text = element_text(color = "black", family = "serif"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.border = element_rect(fill = NA, color = "black", linewidth = 0.5),
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.margin = margin(5, 5, 5, 5, "mm")
+  )
+ATD_plo
+
+# leave-one-out plot
+windowsFonts(A = windowsFont("Times New Roman"))
+loo_dep <- mr_leaveoneout(Dep_Harmonise,method = mr_ivw_fe)
+loo_atd <- mr_leaveoneout(ATD_Harmonise,method = mr_ivw_fe)
+loo_dep_or <- loo_dep %>%
+  mutate(OR  = exp(b),LCI = exp(b - 1.96 * se),UCI = exp(b + 1.96 * se))
+loo_atd_or <- loo_atd %>%
+  mutate(OR  = exp(b),LCI = exp(b - 1.96 * se),UCI = exp(b + 1.96 * se))
+# Function
+make_loo_plot <- function(dat) {
+  xmin <- min(dat$LCI, na.rm = TRUE)
+  xmax <- max(dat$UCI, na.rm = TRUE)  
+  x_lower <- floor(xmin / 0.20) * 0.20
+  x_upper <- ceiling(xmax / 0.20) * 0.20
+  x_breaks <- seq(from = x_lower,to   = x_upper,by   = 0.20)
+  ggplot(dat,aes(x = OR, y = SNP) 
+         ) + 
+    geom_errorbarh(
+      aes(xmin = LCI,xmax = UCI
+      ),
+      height = 0.15,
+      linewidth = 0.55
+    ) +
+    geom_point(size = 2.1
+    ) +
+    geom_vline(
+      xintercept = 1,
+      colour = "grey60",
+      linetype = "solid",
+      linewidth = 0.6
+    ) +
+    scale_x_continuous(
+      breaks = x_breaks,
+      labels = function(x) sprintf("%.1f", x),
+      expand = expansion(mult = c(0.02, 0.02))
+    ) + 
+    coord_cartesian(
+      xlim = c(x_lower, x_upper),
+      clip = "off"
+    ) +
+    labs(
+      x = "OR (95% CI)",
+      y = NULL
+    ) +
+    theme_classic(
+      base_size = 12,
+      base_family = "A"
+    ) +
+    theme(
+      text = element_text(
+        family = "A",
+        colour = "black"
+      ),
+      plot.title = element_blank(),
+      axis.text.y = element_text(
+        family = "A",
+        size = 9,
+        colour = "black"
+      ),
+      axis.text.x = element_text(
+        family = "A",
+        size = 10,
+        colour = "black"
+      ),
+      
+      axis.title.x = element_text(
+        family = "A",
+        size = 11,
+        colour = "black"
+      ),
+      axis.title.y = element_blank(),
+      plot.margin = margin(t = 5.5,r = 5.5,b = 5.5,l = 5.5
+      )
+    )
+}
+p_dep <- make_loo_plot(loo_dep_or)
+p_atd <- make_loo_plot(loo_atd_or)
+
+# funnel plots
+p_funnel_dep <- funnel_dep[[1]] +
+  labs(x = "MR effect estimate",y = "Precision (1/SE)") +
+  theme_classic(base_size = 12,base_family = "A") +
+  theme(text = element_text(family = "A",colour = "black"),
+    plot.title = element_blank(),
+    axis.text.x = element_text(family = "A",size = 10,colour = "black"),
+    axis.text.y = element_text(family = "A",size = 10,colour = "black"),
+    axis.title.x = element_text(family = "A",size = 11,colour = "black"),
+    axis.title.y = element_text(family = "A",size = 11,colour = "black"),
+    legend.text = element_text(family = "A",size = 9,colour = "black"),
+    legend.title = element_blank())
+
+p_funnel_atd <- funnel_atd[[1]] +
+  labs(x = "MR effect estimate",y = "Precision (1/SE)") +
+  theme_classic(base_size = 12,base_family = "A") +
+  theme(text = element_text(family = "A",colour = "black"),
+    plot.title = element_blank(),
+    axis.text.x = element_text(family = "A",size = 10,colour = "black"),
+    axis.text.y = element_text(family = "A",size = 10,colour = "black"),
+    axis.title.x = element_text(family = "A",size = 11,colour = "black"),
+    axis.title.y = element_text(family = "A",size = 11,colour = "black"),
+    legend.text = element_text(family = "A",size = 9,colour = "black"),
+    legend.title = element_blank())
+
+# PheWAS
+library(ieugwasr)
+library(stringr)
+dep_snps <- unique(as.character(Dep_Harmonise$SNP))
+atd_snps <- unique(as.character(ATD_Harmonise$SNP))
+phewas_dep <- ieugwasr::phewas(variants = dep_snps,pval = 5e-8)
+phewas_atd <- ieugwasr::phewas(variants = atd_snps,pval = 5e-8)
+keywords <- paste(
+  c("smoke", "cigarette", "tobacco",
+    "education", "income", "deprivation", "employment",
+    "healthcare", "hospital", "general practitioner", "doctor visit",
+    "bipolar", "schizophrenia", "psychiatric",
+    "CRP", "C-reactive", "inflamm","white blood cell", "neutrophil", "lymphocyte"),
+  collapse = "|")
+dep_relevant <- phewas_dep %>%
+  filter(str_detect(tolower(trait),tolower(keywords)))
+atd_relevant <- phewas_atd %>%
+  filter(str_detect(tolower(trait),tolower(keywords)))
+atd_exclude <- c("rs2517645","rs362331","rs7975763")
+ATD_Harmonise_clean <- ATD_Harmonise %>%
+  filter(!SNP %in% atd_exclude)
+mr(ATD_Harmonise_clean,method_list = "mr_ivw_fe")
+
+# MRlap
+library(MRlap)
+Dep <- Dep %>% 
+  transmute(snp = SNP, chr = CHR, pos = BP, a1 = A1, a2 = A2,
+            beta = BETA, se = SE, N = 449414) %>%
+  mutate(Z = as.numeric(beta) / as.numeric(se),
+         across(c(beta, se), as.numeric), across(c(snp,chr,a1,a2), as.character), across(c(chr,pos,N), as.integer)) %>%
+  select(chr, snp, pos, a1, a2, beta, se, Z, N)
+
+ATD <- ATD %>% 
+  transmute(snp = SNP, chr = CHR, pos = BP, a1 = A1, a2 = A2,
+            beta = BETA, se = SE, N = 304162) %>%
+  mutate(Z = as.numeric(beta) / as.numeric(se),
+         across(c(beta, se), as.numeric), across(c(snp,chr,a1,a2), as.character), across(c(chr,pos,N), as.integer)) %>%
+  select(chr, snp, pos, a1, a2, beta, se, Z, N)
+
+seq_TB <- fread('finngen_R12_AB1_SEQULAE_TUBERCU.gz',header=T)
+head(seq_TB)
+seq_TB <- seq_TB %>%
+  transmute(snp = rsids, chr = `#chrom`, pos = pos, a1 = alt, a2 = ref,
+            beta = beta, se = sebeta, N = 497887) %>%
+  mutate(Z = as.numeric(beta) / as.numeric(se),
+         across(c(beta, se), as.numeric), across(c(snp,chr,a1,a2), as.character), across(c(chr,pos,N), as.integer)) %>%
+  select(chr, snp, pos, a1, a2, beta, se, Z, N)
+
+res_Dep_TB <- MRlap::MRlap(exposure = Dep, outcome = seq_TB,
+                           ld = "eur_w_ld_chr", hm3 = "w_hm3.snplist",
+                           MR_threshold = 5e-6, MR_pruning_dist = 1000, MR_pruning_LD = 0.001)
+res_ATD_TB <- MRlap::MRlap(exposure = ATD, outcome = seq_TB,
+                           ld = "eur_w_ld_chr", hm3 = "w_hm3.snplist",
+                           MR_threshold = 5e-6, MR_pruning_dist = 1000, MR_pruning_LD = 0.001)
+# LDSC intercept
+as.data.frame(cbind(exposure="Dep",Outcome="seq_TB",
+                    intercept=res_Dep_TB[["LDSC"]][["int_crosstrait"]],
+                    se=res_Dep_TB[["LDSC"]][["int_crosstrait_se"]]))
+as.data.frame(cbind(exposure="ATD",Outcome="seq_TB",
+                    intercept=res_ATD_TB[["LDSC"]][["int_crosstrait"]],
+                    se=res_ATD_TB[["LDSC"]][["int_crosstrait_se"]]))
